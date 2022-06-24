@@ -1,0 +1,31 @@
+
+SCORE CALCULATION
+ - Your score measures your performance as the Guesser.
+ - You start with 0 Progression Points. You gain Progression Points as you guess more correct letters. You can gain up to 500 Progression Points.
+ - You start with 1000 Base Points. Base Points are deducted as you guess more incorrect letters. 
+    - If you do not guess the correct word before the game ends, you get 0 Base Points.
+ - You can gain up to 500 Reward Points. You gain Reward Points when you enter the correct word guess before guessing all the correct letters.
+ - For each hint given, you are penalized for 25 points.
+ - For each incorrect word guess, you are penalized for 200 points.
+ - For each word change, you are compensated for 0 points but gain 20 seconds overtime.
+ - Prior hint penalties are voided when the Executioner 
+
+GAME RULES
+As the Guesser...
+    - Guess the word by entering the least amount of letter guesses.
+    - If needed, request hint from the Executioner.
+
+As the Executioner...
+    - Give the Guesser a challenging word to guess.
+    - If needed, meddle with the Guesser's progress by changing the correct word.
+    - If asked for a hint, give the Guesser the hint you deem least helpful.
+
+
+
+React Components:
+- PlayerPlate
+- WordBoard
+- Chatbox
+- Timer
+- hint
+- 
