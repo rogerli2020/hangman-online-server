@@ -15,25 +15,25 @@ class Round:
 
         # private data, should not be accessible to the Guesser.
         self.__chosen_word = None
-        self.__hints : dict = {1:1}
+        self.__hints : dict = None
 
         # variables for score calc, does not need to be shared.
         self.wrong_guess_count : int = 0
 
         # public data, any changes made to then should be notified to both players.
-        self.ex = self.p1
-        self.gsr = self.p2
-        self.board : list = []
-        self.cguesses : set  = set()
-        self.fguesses : set = set()
-        self.hints : list = []
-        self.hint_requested : bool = []
-        self.p1scoreboard : dict = {"GAME_TOTAL" : 0}
-        self.p2scoreboard : dict = {"GAME_TOTAL" : 0}
-        self.rotated : bool = False
-        self.round_state : int = False
-        self.word_was_random : bool = False
-        self.guessed_correctly : bool = False
+        self.ex = None
+        self.gsr = None
+        self.board : list = None
+        self.cguesses : set  = None
+        self.fguesses : set = None
+        self.hints : list = None
+        self.hint_requested : bool = None
+        self.p1scoreboard : dict = None
+        self.p2scoreboard : dict = None
+        self.rotated : bool = None
+        self.round_state : int = None
+        self.word_was_random : bool = None
+        self.guessed_correctly : bool = None
 
         # other
         self.hint_timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"])
@@ -188,16 +188,22 @@ class Round:
     
     def player_choose_word(self, content : str) -> tuple:
         d = Dictionary()
-        word = d.select_random_word() if content == "__RANDOM__" else content
-        word = word.upper()
-        if len(word) <= 2 and content != "__RANDOM__":
-            return (True, "warning", "Word must be longer than 2 characters.")
-        elif not d.check_if_word_exists(word):
-            return (True, "warning", "Word does not exist in our dictionary.")
+        content = content.upper()
+        word = "-"
+        if content == "__RANDOM__":
+            while not word.isalpha():
+                word = d.select_random_word()
         else:
-            self.update_private_data("__chosen_word", word)
-            self.msg_pool.push(self.ex, {"msg_type": "update", "update_type": "__chosen_word", "content": self.__chosen_word})
-            return (True, "success", "Valid word choice!")
+            if len(content) <= 2:
+                return (True, "warning", "Word must be longer than 2 characters. Please choose again.")
+            elif not word.isalpha():
+                return (True, "warning", "Word contains invalid character(s). Please choose again.")
+            elif not d.check_if_word_exists(content):
+                return (True, "warning", "Word does not exist in our dictionary. Please choose again.")
+        word = word.upper()
+        self.update_private_data("__chosen_word", word)
+        self.msg_pool.push(self.ex, {"msg_type": "update", "update_type": "__chosen_word", "content": self.__chosen_word})
+        return (True, "success", "Valid word choice!")
 
     def player_change_word(self, content : str) -> tuple:
         d = Dictionary()

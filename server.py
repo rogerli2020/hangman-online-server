@@ -72,7 +72,7 @@ async def handler(websocket, path):
             }
         )
     )
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.1)
     await websocket.send(
         json.dumps(
             {
@@ -82,7 +82,7 @@ async def handler(websocket, path):
             }
         )
     )
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.1)
     GAME.add_player(new_client)
     if GAME.full():
         t = threading.Thread(target=GAME.start())
