@@ -25,10 +25,13 @@ class Game:
         time.sleep(GAMEVARS["TIME_FOR_READY"])
         self.update_public_data("game_state", GAMEVARS["GAME_STATE_IN_PROGRESS"])
 
+        p1gt = 0
+        p2gt = 0
+
         self.update_public_data("current_round_count", 1)
         while self.current_round_count <= GAMEVARS["MAX_ROUNDS"]:
             self.current_round = Round(self.msg_pool, self.p1, self.p2)
-            self.current_round.start_round()
+            p1gt, p2gt = self.current_round.start_round(p1gt, p2gt)
             self.update_public_data("current_round_count", self.current_round_count + 1)
             if self.current_round_count > GAMEVARS["MAX_ROUNDS"]: break
         self.update_public_data("game_state", GAMEVARS["GAME_STATE_FINISHED"])
@@ -37,7 +40,21 @@ class Game:
         self.thread.start()
     
     def handle_player_msg(self, player, msg):
-        pass
+        if msg["msg_type"] == "action":
+            if self.current_round:
+                self.current_round.handle_player_actions(player, msg)
+        elif msg["msg_type"] == "chat":
+            self.handle_chat(player, msg)
+
+    def handle_chat(self, player, msg):
+        msg = {
+            "msg_type": "chat",
+            "chat_type": "normal",
+            "sender": player.name,
+            "content": msg["content"]
+        }
+        self.msg_pool.push(self.p1, msg)
+        self.msg_pool.push(self.p2, msg)
 
     def add_player(self, player):
         if not self.p1:
@@ -65,3 +82,9 @@ class Game:
         }
         self.msg_pool.push(self.p1, msg)
         self.msg_pool.push(self.p2, msg)
+    
+    def stop_game(self):
+        self.update_public_data("game_state", GAMEVARS["GAME_STATE_FINISHED"])
+
+    def disconnect_player(self, player):
+        pass
