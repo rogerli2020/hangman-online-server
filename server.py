@@ -59,18 +59,19 @@ async def broadcast():
     while True:
         time.sleep(0.001)
         for p in PACKETS.packets:
-            await p.ws.send(json.dumps(p.msg))
-            time.sleep(0.001)
+            if p.ws in CLIENTS:
+                await p.ws.send(json.dumps(p.msg))
+                time.sleep(0.001)
         PACKETS.clear()
         await asyncio.sleep(0)
 
 asyncio.get_event_loop().create_task(broadcast())
 
 async def handler(websocket, path):
-    global CURRENT_ID_COUNT
-    CLIENTS.add(websocket)
+    global CURRENT_ID_COUNT, CLIENTS
     print("Someone connected.")
     new_client = Client(websocket, name=f"GUEST{CURRENT_ID_COUNT}")
+    CLIENTS.add(new_client)
     await websocket.send(
         json.dumps(
         {
@@ -83,7 +84,7 @@ async def handler(websocket, path):
             }
         )
     )
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.001)
     await websocket.send(
         json.dumps(
             {
@@ -93,20 +94,17 @@ async def handler(websocket, path):
             }
         )
     )
-    await asyncio.sleep(0.1)
-    game = GAMES.join_any_game(new_client)
-    if game.full():
-        t = threading.Thread(target=game.start())
-        t.start()
+    await asyncio.sleep(0.001)
     try:
         async for msg in websocket:
+            msg = json.loads(msg)
             print(f"[received] {msg}")
-            if game:
-                msg = json.loads(msg)
-                game.handle_player_msg(new_client, msg)
-                # game.current_round.handle_player_actions(new_client, msg)
+            GAMES.handle_player_msg(new_client, msg)
+    except Exception as e:
+        print(f"ERROR ENCOUNTERED IN server.py: {e}")
     finally:
-        CLIENTS.remove(websocket)
+        CLIENTS.remove(new_client)
+        GAMES.handle_player_disconnect(new_client)
         print("Someone disconnected.")
 
 
@@ -116,8 +114,6 @@ ssl_context.load_cert_chain(
 
 # start_server = websockets.serve(handler, "localhost", port=443)
 start_server = websockets.serve(handler, "localhost", port=8765, ssl=ssl_context)
-print("Here.")
-
 
 asyncio.get_event_loop().run_until_complete(start_server)
 asyncio.get_event_loop().run_forever()

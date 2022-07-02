@@ -39,10 +39,12 @@ class Round:
         self.wrong_guesses : list = None
 
         # other
+        self.current_timer = None
         self.hint_timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"])
+        self.stopped_prematurely = False
 
     def handle_ready_stage(self):
-        timer = Timer(GAMEVARS["TIME_FOR_READY"], send_updates=True, msg_pool=self.msg_pool, p1=self.p1, p2=self.p2)
+        timer = Timer(GAMEVARS["TIME_FOR_READY"], send_updates=True, round=self)
         timer.start()
         timer.join()
 
@@ -55,7 +57,8 @@ class Round:
                 "action_type": "choose_word",
                 "content": "__RANDOM__",
             })
-        timer = Timer(GAMEVARS["TIME_FOR_CHOOSING"], finish_condition_check=finish_condition_check, callback=callback, send_updates=True, msg_pool=self.msg_pool, p1=self.p1, p2=self.p2)
+        timer = Timer(GAMEVARS["TIME_FOR_CHOOSING"], finish_condition_check=finish_condition_check, callback=callback, send_updates=True, round=self)
+        self.current_timer = timer
         timer.start()
         timer.join()
 
@@ -70,12 +73,14 @@ class Round:
         def callback():
             self.msg_pool.push(self.gsr, {"msg_type": "update", "update_type": "__chosen_word", "content": self.__chosen_word})
             self.finalize_score()
-        timer = Timer(GAMEVARS["TIME_FOR_GUESSING"], finish_condition_check=finish_condition_check, callback=callback, send_updates=True, msg_pool=self.msg_pool, p1=self.p1, p2=self.p2)
+        timer = Timer(GAMEVARS["TIME_FOR_GUESSING"], finish_condition_check=finish_condition_check, callback=callback, send_updates=True, round=self)
+        self.current_timer = timer
         timer.start()
         timer.join()
 
     def handle_round_recess(self):
-        timer = Timer(GAMEVARS["TIME_FOR_RECESS"], send_updates=True, msg_pool=self.msg_pool, p1=self.p1, p2=self.p2)
+        timer = Timer(GAMEVARS["TIME_FOR_RECESS"], send_updates=True, round=self)
+        self.current_timer = timer
         timer.start()
         timer.join()
         self.update_private_data("__chosen_word", None)
@@ -97,7 +102,7 @@ class Round:
         def finish_condition_check():
             # check if number of given hints matches.
             if len(self.hints) == self.hints_count:
-                self.hint_timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"])
+                self.hint_timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"], round=self)
                 return True
             return False
         def callback():
@@ -202,6 +207,7 @@ class Round:
 
     def finalize_score(self):
         guesser = self.gsr
+        disconnected = self.p1scoreboard["DISCONNECTED"] if guesser == self.p1 else self.p2scoreboard["DISCONNECTED"]
         total_score = 0
         if guesser is self.p1:
             total_score = self.p1scoreboard["GAME_TOTAL"]
@@ -221,7 +227,7 @@ class Round:
             "COMPENSATION": 0,
             "ROUND_TOTAL": 0,
             "GAME_TOTAL": 0,
-            "DISCONNECTED": False,
+            "DISCONNECTED": disconnected,
         }
         # PROGRESSION SCORE CALCULATION
         prog_points = GAMEVARS["MAX_PROGRESSION_POINTS"] if word_was_guessed else GAMEVARS["MAX_PROGRESSION_POINTS"] * (number_of_correct_guesses / number_of_letters_in_word)
@@ -239,7 +245,7 @@ class Round:
         # COMPENSATION CALCULATION
         res["COMPENSATION"] = int(GAMEVARS["COMPENSATION_FOR_RANDOM"] if self.word_was_random else 0)
         res["ROUND_TOTAL"] = int(res["PROGRESSION"] + res["BASE"] + res["BONUS"] + res["PENALTY"] + res["COMPENSATION"])
-        res["GAME_TOTAL"] = int(res["ROUND_TOTAL"] + total_score)
+        res["GAME_TOTAL"] = int(res["ROUND_TOTAL"] + total_score) if not disconnected else 0
         self.update_public_data("p1scoreboard" if self.gsr is self.p1 else "p2scoreboard", res)
     
     def player_choose_word(self, content : str) -> tuple:
@@ -275,12 +281,17 @@ class Round:
             return (True, "warning", "NOT ACCEPTED. Word does not exist in our dictionary.")
         elif len(set(new_word).intersection(self.fguesses)) != 0:
             return (True, "warning", "NOT ACCEPTED. Word choice contains an already falsely guessed letter.")
+        elif new_word == self.__chosen_word:
+            return (True, "warning", "NOT ACCEPTED. Cannot change to current word.")
+        elif new_word in self.wrong_guesses:
+            return (True, "warning", "NOT ACCEPTED. This word has already been guessed by the Guesser.")
         else:
+            overtime = GAMEVARS["OVERTIME_FOR_CHANGE"]
             msg = {
                 "msg_type": "notification",
                 "show": True,
                 "notification_type": "warning",
-                "content": "The Executioner has changed the word.",
+                "content": f"The Executioner has changed the word. Game time extended by {overtime} seconds.",
                 "tag": "WORD_UPDATED"
             }
             # reset hints
@@ -288,6 +299,7 @@ class Round:
             self.hints_count = 0
             self.update_private_data("__chosen_word", new_word)
             self.msg_pool.push(self.gsr, msg)
+            self.current_timer.extend(overtime)
             return (True, "success", "Word changed successfully!")
 
     def player_choose_hint(self, content):
@@ -316,11 +328,14 @@ class Round:
 
     def player_guess_word(self, content):
         word = content.upper()
-        if word == self.__chosen_word: self.update_public_data("guessed_correctly", True)
+        if word == self.__chosen_word: 
+            self.update_public_data("guessed_correctly", True)
+            return (True, "success", "Your guess was correct!")
         else: 
             self.update_private_data("wrong_guess_count", self.wrong_guess_count + 1)
-            self.wrong_guesses.append(content)
+            self.wrong_guesses.append(word)
             self.update_public_data("wrong_guesses", self.wrong_guesses)
+            return (True, "warning", "Your guess was incorrect. Said amount of points deducted.")
 
     def player_request_hint(self, content):
         def finish_condition_check():
@@ -398,6 +413,7 @@ class Round:
         self.update_public_data("rotated", True)
         self.update_public_data("word_was_random", False)
         self.update_public_data("guessed_correctly", False)
+        self.update_public_data("wrong_guesses", [])
 
         # handle pacing of second half round.
         self.update_public_data("round_state", GAMEVARS["ROUND_STATE_READY"])

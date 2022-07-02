@@ -2,7 +2,7 @@ import time
 import threading
 
 class Timer:
-    def __init__(self, sec, finish_condition_check=None, callback=None, send_updates=False, msg_pool=None, p1=None, p2=None):
+    def __init__(self, sec, finish_condition_check=None, callback=None, send_updates=False, round=None):
         self.finished = False
         self.ms = sec * 10
         self.finish_condition_check = finish_condition_check
@@ -10,15 +10,13 @@ class Timer:
         self.thread = threading.Thread(target=self.start_counting_down, args=())
 
         self.send_updates = send_updates
-        self.msg_pool = msg_pool
-        self.p1 = p1
-        self.p2 = p2
+        self.round = round
     
     def start(self):
         self.thread.start()
     
     def start_counting_down(self):
-        while not self.finished:
+        while not self.finished and not self.round.stopped_prematurely:
             if self.ms == 0:
                 self.finished = True
                 break
@@ -39,8 +37,8 @@ class Timer:
             "update_type": "timer",
             "content": int(self.ms / 10)
         }
-        self.msg_pool.push(self.p1, msg)
-        self.msg_pool.push(self.p2, msg)
+        self.round.msg_pool.push(self.round.p1, msg)
+        self.round.msg_pool.push(self.round.p2, msg)
 
     def extend(self, sec):
         self.ms += sec * 10

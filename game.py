@@ -8,8 +8,9 @@ with open(GAMEVARS_PATH, "r") as f:
     GAMEVARS = json.load(f)
 
 class Game:
-    def __init__(self, msg_pool, id, p1=None, p2=None):
+    def __init__(self, msg_pool, games, id, p1=None, p2=None):
         self.msg_pool = msg_pool # msg pool is a top level object that stores all the messages that the server needs to send.
+        self.games = games
         self.id = id
         self.p1 = p1
         self.p2 = p2
@@ -19,6 +20,9 @@ class Game:
         # public game data
         self.current_round_count = 0
         self.game_state = GAMEVARS["GAME_STATE_WAITING"]
+
+        # other
+        self.stopped_prematurely = False
     
     def start_game(self):
         self.update_public_data("game_state", GAMEVARS["GAME_STATE_READY"])
@@ -29,15 +33,19 @@ class Game:
         p2gt = 0
 
         self.update_public_data("current_round_count", 1)
-        while self.current_round_count <= GAMEVARS["MAX_ROUNDS"]:
+        while self.current_round_count <= GAMEVARS["MAX_ROUNDS"] and not self.stopped_prematurely:
             self.current_round = Round(self.msg_pool, self.p1, self.p2)
             p1gt, p2gt = self.current_round.start_round(p1gt, p2gt)
             self.update_public_data("current_round_count", self.current_round_count + 1)
             if self.current_round_count > GAMEVARS["MAX_ROUNDS"]: break
-        self.update_public_data("game_state", GAMEVARS["GAME_STATE_FINISHED"])
+        self.handle_game_end()
 
     def start(self):
         self.thread.start()
+    
+    def handle_game_end(self):
+        self.update_public_data("game_state", GAMEVARS["GAME_STATE_FINISHED"])
+        self.games.handle_game_finish(self)
     
     def handle_player_msg(self, player, msg):
         if msg["msg_type"] == "action":
@@ -59,8 +67,18 @@ class Game:
     def add_player(self, player):
         if not self.p1:
             self.p1 = player
-        elif not self.p2:
+            self.msg_pool.push(player, {
+                "msg_type": "update",
+                "update_type": "game_state",
+                "content": self.game_state
+            })
+        elif not self.p2 and self.p1.ws != player.ws:
             self.p2 = player
+            self.msg_pool.push(player, {
+                "msg_type": "update",
+                "update_type": "game_state",
+                "content": self.game_state
+            })
     
     def full(self):
         return self.p1 is not None and self.p2 is not None
@@ -82,9 +100,17 @@ class Game:
         }
         self.msg_pool.push(self.p1, msg)
         self.msg_pool.push(self.p2, msg)
-    
-    def stop_game(self):
-        self.update_public_data("game_state", GAMEVARS["GAME_STATE_FINISHED"])
 
-    def disconnect_player(self, player):
-        pass
+    def handle_disconnect(self, player):
+        if self.current_round:
+            if player == self.p1:
+                self.current_round.update_public_data("p1scoreboard", {"ID": self.p1.id, "FINISHED_GUESSING": False, "GAME_TOTAL" : 0, "DISCONNECTED" : True})
+            elif player == self.p2:
+                self.current_round.update_public_data("p2scoreboard", {"ID": self.p2.id, "FINISHED_GUESSING": False, "GAME_TOTAL" : 0, "DISCONNECTED" : True})
+            self.current_round.stopped_prematurely = True
+            self.stopped_prematurely = True
+        else:
+            if player == self.p1:
+                self.p1 = None
+            elif player == self.p2:
+                self.p2 = None
