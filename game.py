@@ -7,6 +7,8 @@ GAMEVARS_PATH = "./gamevars.json"
 with open(GAMEVARS_PATH, "r") as f:
     GAMEVARS = json.load(f)
 
+HINT_LOCK = threading.Lock()
+
 class Game:
     def __init__(self, msg_pool, games, id, p1=None, p2=None):
         self.msg_pool = msg_pool # msg pool is a top level object that stores all the messages that the server needs to send.
@@ -25,6 +27,7 @@ class Game:
         self.stopped_prematurely = False
     
     def start_game(self):
+        self.handle_chat("SERVER", {"content": "WARNING: This game uses unmonitored outside resources that might return pornographic or violent content. Player discretion is advised."})
         self.update_public_data("game_state", GAMEVARS["GAME_STATE_READY"])
         time.sleep(GAMEVARS["TIME_FOR_READY"])
         self.update_public_data("game_state", GAMEVARS["GAME_STATE_IN_PROGRESS"])
@@ -34,7 +37,7 @@ class Game:
 
         self.update_public_data("current_round_count", 1)
         while self.current_round_count <= GAMEVARS["MAX_ROUNDS"] and not self.stopped_prematurely:
-            self.current_round = Round(self.msg_pool, self.p1, self.p2)
+            self.current_round = Round(self.msg_pool, self.p1, self.p2, hint_lock = HINT_LOCK)
             p1gt, p2gt = self.current_round.start_round(p1gt, p2gt)
             self.update_public_data("current_round_count", self.current_round_count + 1)
             if self.current_round_count > GAMEVARS["MAX_ROUNDS"]: break
@@ -58,7 +61,7 @@ class Game:
         msg = {
             "msg_type": "chat",
             "chat_type": "normal",
-            "sender": player.name,
+            "sender": player.name if player != "SERVER" else "SERVER",
             "content": msg["content"]
         }
         self.msg_pool.push(self.p1, msg)

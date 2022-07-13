@@ -30,6 +30,10 @@ class Timer:
                 self.send_update()
         if self.callback is not None and self.ms <= 0:
             self.callback()
+        print("DONE.")
+    
+    def set_sec(self, sec):
+        self.ms = sec * 10
     
     def send_update(self):
         msg = {
@@ -45,3 +49,6 @@ class Timer:
 
     def join(self):
         self.thread.join()
+    
+    def is_alive(self):
+        return self.thread.is_alive()

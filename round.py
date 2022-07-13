@@ -1,14 +1,17 @@
 import json
 import random
+
+from numpy import False_, number
 from timer import Timer
 from english_dictionary.dictionary import Dictionary
+from image_fetcher import ImageFetcher
 
 GAMEVARS_PATH = "./gamevars.json"
 with open(GAMEVARS_PATH, "r") as f:
     GAMEVARS = json.load(f)
 
 class Round:
-    def __init__(self, msg_pool, p1, p2, last_round=False):
+    def __init__(self, msg_pool, p1, p2, last_round=False, hint_lock=None):
         self.msg_pool = msg_pool
         self.p1 = p1
         self.p2 = p2
@@ -16,7 +19,7 @@ class Round:
 
         # private data, should not be accessible to the Guesser.
         self.__chosen_word = None
-        self.__hints : dict = {}
+        self.__hints = None
 
         # variables for score calc, does not need to be shared.
         self.wrong_guess_count : int = None
@@ -40,8 +43,9 @@ class Round:
 
         # other
         self.current_timer = None
-        self.hint_timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"])
+        self.hint_timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"], round=self)
         self.stopped_prematurely = False
+        self.hint_lock = hint_lock
 
     def handle_ready_stage(self):
         timer = Timer(GAMEVARS["TIME_FOR_READY"], send_updates=True, round=self)
@@ -86,38 +90,28 @@ class Round:
         self.update_private_data("__chosen_word", None)
         self.update_private_data("__hints", {})
 
-    def handle_hint_requested(self):
-        def create_hints():
-            hints =  {
-                1: {
-                    "type": "word_type",
-                    "content": "TEST"
-                },
-                2: {
-                    "type": "relevant_word",
-                    "content": "TEST"
-                }
-            }
+    def create_hints(self):
+        with self.hint_lock:
+            d = Dictionary()
+            image_generator = ImageFetcher()
+            if self.__chosen_word == None: return
+            number_of_relevant_words = 2
+            number_of_pics = 2
+            hints =  {}
+            word_types = d.get_word_types(self.__chosen_word)
+            relevant_words = d.get_relevant_words(self.__chosen_word, number_of_relevant_words)
+            pics = image_generator.get_url_from_keyword(self.__chosen_word, number_of_pics)
+            count = 1
+            hints[count] = {"id": count, "hint_type": "word_types", "content": word_types}
+            count += 1
+            for i in relevant_words:
+                hints[count] = ({"id": count, "hint_type": "relevant_words", "content": i})
+                count += 1
+            for i in pics:
+                hints[count] = ({"id": count, "hint_type": "image", "content": i})
+                count += 1
             self.update_private_data("__hints", hints)
-        def finish_condition_check():
-            # check if number of given hints matches.
-            if len(self.hints) == self.hints_count:
-                self.hint_timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"], round=self)
-                return True
-            return False
-        def callback():
-            # choose for the player.
-            self.handle_player_actions(self.ex, msg={
-                "msg_type": "action",
-                "action_type": "choose_hint",
-                "content": random.choice(list(self.__hints)),
-            })
-        self.hints_count += 1
-        create_hints()
-        timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"])
-        timer.finish_condition_check = finish_condition_check
-        timer.callback = callback
-        timer.start()
+            # print(self.__hints)
     
     def update_public_data(self, var_name: str, new_data):
         def get_serializable(new_data):
@@ -194,14 +188,16 @@ class Round:
                 self.msg_pool.push(self.ex, {"msg_type": "update", "update_type": "__chosen_word", "content": self.__chosen_word})
         elif var_name == "__hints":
             self.__hints = new_data
-            if len(self.__hints) == 0:
+            if self.__hints is None or len(self.__hints) == 0:
                 msg = {
                     "msg_type": "update",
                     "update_type": "__hints",
-                    "content": {}
+                    "content": []
                 }
                 self.msg_pool.push(self.p1, msg)
                 self.msg_pool.push(self.p2, msg)
+            else:
+                self.msg_pool.push(self.ex, {"msg_type": "update", "update_type": "__hints", "content": list(self.__hints.values())})
         elif var_name == "wrong_guess_count":
             self.wrong_guess_count = new_data
 
@@ -298,16 +294,33 @@ class Round:
             self.update_public_data("hints", [])
             self.hints_count = 0
             self.update_private_data("__chosen_word", new_word)
+            self.update_private_data("__hints", {})
+            self.update_private_data("__hints", None)
             self.msg_pool.push(self.gsr, msg)
             self.current_timer.extend(overtime)
             return (True, "success", "Word changed successfully!")
 
     def player_choose_hint(self, content):
-        if content not in self.__hints:
-            return (True, "warning", "Not a valid choice.")
+        if self.__hints is None: return
+        if content not in self.__hints and content != "__RANDOM__":
+            return (True, "warning", "Not a valid hint choice.")
         else:
-            self.update_public_data("hints", self.hints.append(self.__hints[content]))
+            if content == "__RANDOM__":
+                content = random.choice(list(self.__hints))
+            self.hints.append(self.__hints[content])
+            self.update_public_data("hints", self.hints)
+            self.update_public_data("hint_requested", False)
             del self.__hints[content]
+            self.update_private_data("__hints", self.__hints)
+            notif = {
+                "msg_type": "notification",
+                "show": True,
+                "notification_type": "success",
+                "content": "New hint has been added to the list. Scroll to view the new hint.",
+                "tag": "HINT_UPDATED"
+            }
+            self.msg_pool.push(self.p1, notif)
+            self.msg_pool.push(self.p2, notif)
             return (True, "success", "Valid hint choice.")
 
     def player_guess_letter(self, content):
@@ -339,12 +352,32 @@ class Round:
 
     def player_request_hint(self, content):
         def finish_condition_check():
-            self.hints_count == len(self.hints)
-        if not self.hint_timer.finished: return (False, "warning", "Cannot request hint at this moment.")
+            if len(self.hints) == self.hints_count:
+                self.hint_timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"], round=self)
+                return True
+            return False
+        def callback():
+            # choose for the player.
+            self.handle_player_actions(self.ex, msg={
+                "msg_type": "action",
+                "action_type": "choose_hint",
+                "content": "__RANDOM__",
+            })
+            self.update_public_data("hint_requested", False)
+            self.hint_timer = Timer(GAMEVARS["TIME_FOR_CHOOSING_HINT"], round=self)
+        if self.hint_timer.is_alive(): 
+            return (False, "warning", "Cannot request hint at this moment.")
+        elif self.__hints is not None and len(self.__hints) == 0:
+            return (False, "warning", "Cannot request more hints.")
         else:
+            if self.__hints is None:
+                self.create_hints()
             self.hints_count += 1
             self.hint_timer.finish_condition_check = finish_condition_check
+            self.hint_timer.callback = callback
             self.hint_timer.start()
+            self.update_public_data("hint_requested", True)
+            return (True, "success", "Please wait for the Executioner to choose a hint...")
 
     def handle_player_actions(self, player, msg):
         action_type = msg["action_type"]
@@ -358,20 +391,22 @@ class Round:
             "request_hint": self.player_request_hint
         }
         response = function_mapping[action_type](content)
-        self.msg_pool.push(
-            player, {
-                "msg_type": "notification", 
-                "show": response[0],
-                "notification_type": response[1], 
-                "content": response[2],
-                "tag": None
-                }
-            )
+        if response is not None:
+            self.msg_pool.push(
+                player, {
+                    "msg_type": "notification", 
+                    "show": response[0],
+                    "notification_type": response[1], 
+                    "content": response[2],
+                    "tag": None
+                    }
+                )
     
     
     def start_round(self, p1gt=0, p2gt=0):
 
         # set initial data for first half round.
+        self.__hints = None
         self.wrong_guess_count = 0
         self.hints_count = 0
         self.update_public_data("ex", self.p1)
@@ -399,6 +434,7 @@ class Round:
         self.handle_round_recess()
 
         # set initial data for second half round.
+        self.__hints = None
         self.wrong_guess_count = 0
         self.hints_count = 0
         self.update_public_data("ex", self.p2)

@@ -1,4 +1,7 @@
 from game import Game
+from profanity_filter import ProfanityFilter
+
+PF = ProfanityFilter()
 
 class Games:
     def __init__(self, msg_pool) -> None:
@@ -39,11 +42,17 @@ class Games:
                 pass
         else:
             if player.game is not None:
+                if message["msg_type"] == "chat":
+                    message["content"] = PF.censor(message["content"])
+                elif message["msg_type"] == "action":
+                    if message["action_type"] == "choose_word" or message["action_type"] == "change_word":
+                        message["content"] = PF.censor(message["content"])
                 player.game.handle_player_msg(player, message)
 
     def handle_player_disconnect(self, player):
         if player.game:
             player.game.handle_disconnect(player)
+        del self.games[player.game.id]
     
     def handle_game_finish(self, game):
         game.p1.game = None

@@ -2,10 +2,8 @@ import websockets
 import asyncio
 import json
 import time
-import threading
 import ssl
 import pathlib
-from game import Game
 from games import Games
 
 CURRENT_ID_COUNT = 0
@@ -100,8 +98,8 @@ async def handler(websocket, path):
             msg = json.loads(msg)
             print(f"[received] {msg}")
             GAMES.handle_player_msg(new_client, msg)
-    except Exception as e:
-        print(f"ERROR ENCOUNTERED IN server.py: {e}")
+    # except Exception as e:
+    #     print(f"ERROR ENCOUNTERED IN server.py: {e}")
     finally:
         CLIENTS.remove(new_client)
         GAMES.handle_player_disconnect(new_client)
@@ -112,8 +110,8 @@ ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ssl_context.load_cert_chain(
     pathlib.Path(__file__).with_name("localhost.pem"))
 
-# start_server = websockets.serve(handler, "localhost", port=443)
-start_server = websockets.serve(handler, "localhost", port=8765, ssl=ssl_context)
+start_server = websockets.serve(handler, port=8765)
+# start_server = websockets.serve(handler, "localhost", port=8765, ssl=ssl_context)
 
 asyncio.get_event_loop().run_until_complete(start_server)
 asyncio.get_event_loop().run_forever()
